@@ -912,6 +912,84 @@
     text-align: center; padding: 24px 0;
     font-size: 0.82rem; color: var(--slate);
   }
+
+  /* ── SLIDESHOW CONTROLS ── */
+  .slideshow-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 56px;
+    background: rgba(44,44,44,0.95);
+    backdrop-filter: blur(12px);
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    z-index: 600;
+    transform: translateY(100%);
+    transition: transform .3s ease;
+    padding: 0 20px;
+  }
+  .slideshow-bar.show { transform: translateY(0); }
+  .slideshow-bar button {
+    background: none; border: 1px solid rgba(255,255,255,0.25);
+    color: var(--warm-white); border-radius: 50px;
+    padding: 6px 16px; font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem; font-weight: 500; cursor: pointer;
+    letter-spacing: 0.03em; transition: all .2s;
+  }
+  .slideshow-bar button:hover { background: rgba(255,255,255,0.15); }
+  .slideshow-bar button.ss-active { background: var(--dusty-rose); border-color: var(--dusty-rose); }
+  .slideshow-bar .ss-label {
+    font-size: 0.72rem; color: rgba(255,255,255,0.6);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .slideshow-bar .ss-progress {
+    flex: 1; max-width: 200px; height: 3px;
+    background: rgba(255,255,255,0.15); border-radius: 3px;
+    overflow: hidden;
+  }
+  .slideshow-bar .ss-progress-fill {
+    height: 100%; background: var(--dusty-rose);
+    border-radius: 3px; width: 0%;
+    transition: width linear;
+  }
+
+  /* ── GIF EXPORT OVERLAY ── */
+  .gif-overlay {
+    position: fixed; inset: 0;
+    background: rgba(44,44,44,0.85);
+    z-index: 2000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    opacity: 0; pointer-events: none; transition: opacity .3s;
+  }
+  .gif-overlay.show { opacity: 1; pointer-events: all; }
+  .gif-overlay h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.6rem; font-weight: 400; color: var(--warm-white);
+  }
+  .gif-progress-bar {
+    width: min(320px, 80vw); height: 6px;
+    background: rgba(255,255,255,0.15); border-radius: 6px; overflow: hidden;
+  }
+  .gif-progress-fill {
+    height: 100%; background: var(--dusty-rose);
+    border-radius: 6px; width: 0%;
+    transition: width .2s ease;
+  }
+  .gif-status {
+    font-size: 0.82rem; color: rgba(255,255,255,0.7);
+    letter-spacing: 0.04em;
+  }
+  .gif-cancel-btn {
+    background: none; border: 1px solid rgba(255,255,255,0.3);
+    color: var(--warm-white); border-radius: 50px;
+    padding: 8px 24px; font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem; cursor: pointer; transition: all .2s;
+  }
+  .gif-cancel-btn:hover { background: rgba(255,255,255,0.1); }
+
+  @media (max-width: 680px) {
+    .slideshow-bar { gap: 8px; padding: 0 10px; height: 50px; }
+    .slideshow-bar button { font-size: 0.7rem; padding: 5px 12px; }
+    .slideshow-bar .ss-label { font-size: 0.65rem; }
+  }
 </style>
 </head>
 <body>
@@ -924,6 +1002,9 @@
     <button class="btn" onclick="openMediaPanel()">&#128247; Media</button>
     <button class="btn" onclick="openSaveManager()">&#128190; Saves</button>
     <button class="btn" id="musicBtn" onclick="toggleMusic()">&#9835; Music</button>
+    <button class="btn" id="slideshowBtn" onclick="toggleSlideshow()">&#9654; Slideshow</button>
+    <button class="btn" onclick="startGifExport()">GIF</button>
+    <button class="btn" onclick="startVideoExport()">&#127916; Video</button>
     <button class="btn btn-publish" onclick="openModal()">Publish</button>
     <span class="page-counter" id="pageCounter">Cover</span>
   </div>
@@ -1021,6 +1102,25 @@
   </div>
 </div>
 
+<!-- SLIDESHOW BAR -->
+<div class="slideshow-bar" id="slideshowBar">
+  <span class="ss-label">Slideshow</span>
+  <button id="ssPauseBtn" onclick="toggleSlideshowPause()">&#10074;&#10074; Pause</button>
+  <div class="ss-progress"><div class="ss-progress-fill" id="ssProgressFill"></div></div>
+  <button class="ss-speed-btn" onclick="cycleSlideshowSpeed()">3s</button>
+  <button onclick="stopSlideshow()">&#10005; Stop</button>
+</div>
+
+<!-- GIF EXPORT OVERLAY -->
+<div class="gif-overlay" id="gifOverlay">
+  <h3 id="gifTitle">Creating your GIF&hellip;</h3>
+  <div class="gif-progress-bar"><div class="gif-progress-fill" id="gifProgressFill"></div></div>
+  <div class="gif-status" id="gifStatus">Preparing pages&hellip;</div>
+  <button class="gif-cancel-btn" id="gifCancelBtn" onclick="cancelGifExport()">Cancel</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 <script>
 // ================================================================
 //  PAGE DATA — each page has a layout and photos
@@ -2103,6 +2203,645 @@ function deleteSave(idx) {
   saves.splice(idx, 1);
   setSaves(saves);
   renderSaveList();
+}
+
+// ================================================================
+//  SLIDESHOW
+// ================================================================
+let slideshowTimer = null;
+let slideshowPaused = false;
+let slideshowSpeed = 3; // seconds per page
+let ssProgressTimer = null;
+
+function toggleSlideshow() {
+  if (slideshowTimer) {
+    stopSlideshow();
+  } else {
+    startSlideshow();
+  }
+}
+
+function startSlideshow() {
+  if (slideshowTimer) return;
+  // Go to first page
+  if (mobileMode) currentMobilePage = 0;
+  else currentSpread = 0;
+  render();
+
+  slideshowPaused = false;
+  document.getElementById('slideshowBar').classList.add('show');
+  document.getElementById('slideshowBtn').classList.add('active');
+  document.getElementById('slideshowBtn').textContent = '\u25A0 Slideshow';
+  document.getElementById('ssPauseBtn').innerHTML = '&#10074;&#10074; Pause';
+  updateSsSpeedLabel();
+  scheduleSlideshowNext();
+}
+
+function stopSlideshow() {
+  clearTimeout(slideshowTimer);
+  clearInterval(ssProgressTimer);
+  slideshowTimer = null;
+  slideshowPaused = false;
+  document.getElementById('slideshowBar').classList.remove('show');
+  document.getElementById('slideshowBtn').classList.remove('active');
+  document.getElementById('slideshowBtn').textContent = '\u25B6 Slideshow';
+  document.getElementById('ssProgressFill').style.width = '0%';
+  document.getElementById('ssProgressFill').style.transition = 'none';
+}
+
+function toggleSlideshowPause() {
+  if (slideshowPaused) {
+    slideshowPaused = false;
+    document.getElementById('ssPauseBtn').innerHTML = '&#10074;&#10074; Pause';
+    scheduleSlideshowNext();
+  } else {
+    slideshowPaused = true;
+    clearTimeout(slideshowTimer);
+    clearInterval(ssProgressTimer);
+    slideshowTimer = -1; // keep bar visible
+    document.getElementById('ssPauseBtn').textContent = '\u25B6 Play';
+    document.getElementById('ssProgressFill').style.transition = 'none';
+  }
+}
+
+function cycleSlideshowSpeed() {
+  const speeds = [2, 3, 5, 8];
+  const idx = speeds.indexOf(slideshowSpeed);
+  slideshowSpeed = speeds[(idx + 1) % speeds.length];
+  updateSsSpeedLabel();
+  if (slideshowTimer && !slideshowPaused) {
+    clearTimeout(slideshowTimer);
+    clearInterval(ssProgressTimer);
+    scheduleSlideshowNext();
+  }
+}
+
+function updateSsSpeedLabel() {
+  document.querySelector('.ss-speed-btn').textContent = slideshowSpeed + 's';
+}
+
+function scheduleSlideshowNext() {
+  const fill = document.getElementById('ssProgressFill');
+  fill.style.transition = 'none';
+  fill.style.width = '0%';
+  // Force reflow
+  fill.offsetHeight;
+  fill.style.transition = 'width ' + slideshowSpeed + 's linear';
+  fill.style.width = '100%';
+
+  slideshowTimer = setTimeout(() => {
+    const atEnd = mobileMode
+      ? currentMobilePage >= mobilePages.length - 1
+      : currentSpread >= total - 1;
+
+    if (atEnd) {
+      stopSlideshow();
+      return;
+    }
+    nextPage();
+    setTimeout(() => scheduleSlideshowNext(), 400);
+  }, slideshowSpeed * 1000);
+}
+
+// ================================================================
+//  PAGE-FLIP ANIMATION (Canvas 2D)
+// ================================================================
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function splitSpread(spreadCanvas) {
+  const spineW = 12;
+  const pageW = Math.floor((spreadCanvas.width - spineW) / 2);
+  const pageH = spreadCanvas.height;
+  const left = document.createElement('canvas');
+  left.width = pageW; left.height = pageH;
+  left.getContext('2d').drawImage(spreadCanvas, 0, 0, pageW, pageH, 0, 0, pageW, pageH);
+  const right = document.createElement('canvas');
+  right.width = pageW; right.height = pageH;
+  right.getContext('2d').drawImage(spreadCanvas, pageW + spineW, 0, pageW, pageH, 0, 0, pageW, pageH);
+  return { left, right };
+}
+
+function drawPageFlipFrame(ctx, w, h, curLeft, curRight, nextLeft, nextRight, t) {
+  const spineW = 12;
+  const pageW = Math.floor((w - spineW) / 2);
+  const spineX = pageW;
+  const angle = t * Math.PI;
+  const apparentW = Math.max(1, pageW * Math.abs(Math.cos(angle)));
+  const shadowIntensity = Math.sin(angle) * 0.35;
+
+  // Background
+  ctx.fillStyle = '#FDFAF7';
+  ctx.fillRect(0, 0, w, h);
+
+  // Left page: current until page passes spine, then next
+  if (t < 0.5) {
+    ctx.drawImage(curLeft, 0, 0, pageW, h, 0, 0, pageW, h);
+  } else {
+    ctx.drawImage(nextLeft, 0, 0, pageW, h, 0, 0, pageW, h);
+  }
+
+  // Right page: next spread's right (revealed underneath)
+  ctx.drawImage(nextRight, 0, 0, pageW, h, pageW + spineW, 0, pageW, h);
+
+  // Spine
+  const spineGrad = ctx.createLinearGradient(spineX, 0, spineX + spineW, 0);
+  spineGrad.addColorStop(0, '#ddd3c8');
+  spineGrad.addColorStop(0.5, '#FDFAF7');
+  spineGrad.addColorStop(1, '#ddd3c8');
+  ctx.fillStyle = spineGrad;
+  ctx.fillRect(spineX, 0, spineW, h);
+
+  // Shadow on the page beneath the turning page
+  if (t < 0.5) {
+    // Shadow on right side (next right page revealed)
+    const shadowW = Math.sin(angle) * 25;
+    const sx = spineX + spineW + apparentW;
+    const shadowGrad = ctx.createLinearGradient(sx, 0, sx + shadowW, 0);
+    shadowGrad.addColorStop(0, 'rgba(0,0,0,' + (shadowIntensity * 0.5) + ')');
+    shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shadowGrad;
+    ctx.fillRect(sx, 0, shadowW, h);
+  } else {
+    // Shadow on left side (next left page)
+    const shadowW = Math.sin(angle) * 25;
+    const sx = spineX - apparentW - shadowW;
+    const shadowGrad = ctx.createLinearGradient(sx, 0, sx + shadowW, 0);
+    shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    shadowGrad.addColorStop(1, 'rgba(0,0,0,' + (shadowIntensity * 0.5) + ')');
+    ctx.fillStyle = shadowGrad;
+    ctx.fillRect(sx, 0, shadowW, h);
+  }
+
+  // The turning page
+  ctx.save();
+  if (t < 0.5) {
+    // Right page folding toward spine
+    ctx.drawImage(curRight, 0, 0, pageW, h, spineX + spineW, 0, apparentW, h);
+    // Darkening overlay on the turning page (shadow near fold)
+    const foldGrad = ctx.createLinearGradient(spineX + spineW, 0, spineX + spineW + apparentW, 0);
+    foldGrad.addColorStop(0, 'rgba(0,0,0,' + (shadowIntensity * 0.3) + ')');
+    foldGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = foldGrad;
+    ctx.fillRect(spineX + spineW, 0, apparentW, h);
+  } else {
+    // Page landing on left side (shows next spread's left, mirrored)
+    ctx.translate(spineX, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(nextLeft, 0, 0, pageW, h, 0, 0, apparentW, h);
+    // Darkening overlay
+    const foldGrad = ctx.createLinearGradient(0, 0, apparentW, 0);
+    foldGrad.addColorStop(0, 'rgba(0,0,0,' + (shadowIntensity * 0.3) + ')');
+    foldGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = foldGrad;
+    ctx.fillRect(0, 0, apparentW, h);
+  }
+  ctx.restore();
+}
+
+function expandFramesWithFlips(frames, flipCount, holdDelay, flipDelay) {
+  const expanded = [];
+  const w = frames[0].width;
+  const h = frames[0].height;
+  // Reusable canvas for drawing flip frames
+  const flipCanvas = document.createElement('canvas');
+  flipCanvas.width = w; flipCanvas.height = h;
+  const flipCtx = flipCanvas.getContext('2d');
+
+  for (let i = 0; i < frames.length; i++) {
+    expanded.push({ canvas: frames[i], delay: holdDelay });
+
+    if (i < frames.length - 1) {
+      const cur = splitSpread(frames[i]);
+      const nxt = splitSpread(frames[i + 1]);
+      for (let f = 1; f <= flipCount; f++) {
+        const t = easeInOutCubic(f / (flipCount + 1));
+        drawPageFlipFrame(flipCtx, w, h, cur.left, cur.right, nxt.left, nxt.right, t);
+        // Copy pixel data since we reuse the canvas
+        const frameCopy = document.createElement('canvas');
+        frameCopy.width = w; frameCopy.height = h;
+        frameCopy.getContext('2d').drawImage(flipCanvas, 0, 0);
+        expanded.push({ canvas: frameCopy, delay: flipDelay });
+      }
+    }
+  }
+  // Last frame gets longer hold
+  if (expanded.length > 0) expanded[expanded.length - 1].delay = 5000;
+  return expanded;
+}
+
+// ================================================================
+//  GIF EXPORT
+// ================================================================
+let gifCancelled = false;
+
+// Convert an external image URL to a base64 data URL (bypasses CORS taint)
+async function imageToDataUrl(url) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+  });
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+// Pre-convert all external images to data URLs so html2canvas won't taint the canvas
+async function preloadAllImages(statusFn) {
+  const originals = [];
+  let count = 0;
+  const tasks = [];
+
+  for (let p = 0; p < PAGE_DATA.length; p++) {
+    const page = PAGE_DATA[p];
+    if (!page.photos) continue;
+    for (let s = 0; s < page.photos.length; s++) {
+      const src = page.photos[s];
+      if (src && src.trim() && !src.startsWith('data:')) {
+        originals.push({ p, s, src });
+        tasks.push((async () => {
+          try {
+            const dataUrl = await imageToDataUrl(src);
+            PAGE_DATA[p].photos[s] = dataUrl;
+          } catch(e) { /* keep original if CORS fails */ }
+          count++;
+          if (statusFn) statusFn(count, tasks.length);
+        })());
+      }
+    }
+  }
+
+  await Promise.all(tasks);
+  return originals;
+}
+
+function restoreImageUrls(originals) {
+  originals.forEach(o => { PAGE_DATA[o.p].photos[o.s] = o.src; });
+}
+
+async function startGifExport() {
+  gifCancelled = false;
+  document.getElementById('gifOverlay').classList.add('show');
+  document.getElementById('gifProgressFill').style.width = '0%';
+  document.getElementById('gifStatus').textContent = 'Loading images\u2026';
+  document.getElementById('gifTitle').textContent = 'Creating your GIF\u2026';
+  document.getElementById('gifCancelBtn').textContent = 'Cancel';
+
+  if (slideshowTimer) stopSlideshow();
+
+  const savedSpread = currentSpread;
+  const savedMobile = currentMobilePage;
+  const wasEdit = isEditMode;
+  if (wasEdit) { isEditMode = false; render(); }
+
+  // Step 1: Convert all external images to data URLs (fixes CORS/taint)
+  const originals = await preloadAllImages((done, tot) => {
+    document.getElementById('gifProgressFill').style.width = Math.round((done / tot) * 15) + '%';
+    document.getElementById('gifStatus').textContent = 'Loading image ' + done + ' of ' + tot + '\u2026';
+  });
+
+  if (gifCancelled) {
+    restoreImageUrls(originals);
+    restoreAfterExport(savedSpread, savedMobile, wasEdit);
+    return;
+  }
+
+  // Step 2: Inject style override to kill animations/transitions during capture
+  const captureStyle = document.createElement('style');
+  captureStyle.id = 'gif-capture-override';
+  captureStyle.textContent = [
+    '.page-left > *, .page-right > * {',
+    '  animation: none !important;',
+    '  opacity: 1 !important;',
+    '  transform: none !important;',
+    '}',
+    '.cover-left, .cover-right, .photo-page, .end-left, .end-right, .blank-page,',
+    '.text-page-body, .photo-grid, .photo-cell, .photo-cell img, .photo-meta,',
+    '.photo-caption, .cover-left-name, .cover-left-label, .cover-left-date,',
+    '.cover-left-hint, .cover-right-quote, .cover-right-attr, .end-title, .end-sub {',
+    '  animation: none !important;',
+    '  opacity: 1 !important;',
+    '  transform: none !important;',
+    '  visibility: visible !important;',
+    '}',
+    '.photo-cell img {',
+    '  position: absolute; inset: 0;',
+    '  width: 100% !important; height: 100% !important;',
+    '  display: block !important; opacity: 1 !important;',
+    '}'
+  ].join('\n');
+  document.head.appendChild(captureStyle);
+
+  // Step 3: Capture two-page spreads at native resolution
+  const gifSpreads = buildSpreads();
+  const totalPages = gifSpreads.length;
+  const frames = [];
+  let pageIndex = 0;
+
+  function captureNext() {
+    if (gifCancelled) {
+      captureStyle.remove();
+      restoreImageUrls(originals);
+      restoreAfterExport(savedSpread, savedMobile, wasEdit);
+      return;
+    }
+    if (pageIndex >= totalPages) {
+      captureStyle.remove();
+      restoreImageUrls(originals);
+      buildGif(frames, savedSpread, savedMobile, wasEdit);
+      return;
+    }
+
+    currentSpread = pageIndex;
+    renderDesktop();
+
+    const pct = 15 + Math.round(((pageIndex + 1) / totalPages) * 25);
+    document.getElementById('gifProgressFill').style.width = pct + '%';
+    document.getElementById('gifStatus').textContent = 'Capturing spread ' + (pageIndex + 1) + ' of ' + totalPages + '\u2026';
+
+    setTimeout(() => {
+      const bookEl = document.getElementById('book');
+      html2canvas(bookEl, {
+        backgroundColor: '#FDFAF7',
+        scale: 1,
+        useCORS: false,
+        allowTaint: false,
+        logging: false,
+        width: bookEl.offsetWidth,
+        height: bookEl.offsetHeight
+      }).then(canvas => {
+        frames.push(canvas);
+        pageIndex++;
+        captureNext();
+      }).catch((err) => {
+        console.warn('Capture failed for spread', pageIndex, err);
+        const c = document.createElement('canvas');
+        c.width = 1052; c.height = 680;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#FDFAF7';
+        ctx.fillRect(0, 0, 1052, 680);
+        frames.push(c);
+        pageIndex++;
+        captureNext();
+      });
+    }, 600);
+  }
+
+  captureNext();
+}
+
+async function buildGif(frames, savedSpread, savedMobile, wasEdit) {
+  if (frames.length === 0 || gifCancelled) {
+    restoreAfterExport(savedSpread, savedMobile, wasEdit);
+    return;
+  }
+
+  document.getElementById('gifStatus').textContent = 'Loading encoder\u2026';
+  document.getElementById('gifProgressFill').style.width = '42%';
+
+  // Fetch worker script and create same-origin blob URL (fixes file:// CORS)
+  let workerUrl;
+  try {
+    const resp = await fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
+    const workerBlob = new Blob([await resp.text()], { type: 'application/javascript' });
+    workerUrl = URL.createObjectURL(workerBlob);
+  } catch (e) {
+    document.getElementById('gifStatus').textContent = 'Failed to load encoder.';
+    document.getElementById('gifCancelBtn').textContent = 'Close';
+    restoreAfterExport(savedSpread, savedMobile, wasEdit);
+    return;
+  }
+
+  document.getElementById('gifStatus').textContent = 'Encoding GIF\u2026';
+
+  const w = frames[0].width;
+  const h = frames[0].height;
+
+  const gif = new GIF({
+    workers: 2,
+    quality: 1,
+    width: w,
+    height: h,
+    dither: 'FloydSteinberg',
+    workerScript: workerUrl
+  });
+
+  frames.forEach((canvas, i) => {
+    const delay = (i === frames.length - 1) ? 5000 : 3000;
+    gif.addFrame(canvas, { delay: delay, copy: true });
+  });
+
+  gif.on('progress', p => {
+    const pct = 42 + Math.round(p * 58);
+    document.getElementById('gifProgressFill').style.width = pct + '%';
+    document.getElementById('gifStatus').textContent = 'Encoding GIF\u2026 ' + Math.round(p * 100) + '%';
+  });
+
+  gif.on('finished', blob => {
+    URL.revokeObjectURL(workerUrl);
+    if (gifCancelled) {
+      restoreAfterExport(savedSpread, savedMobile, wasEdit);
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (CONFIG.name.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'photobook') + '-slideshow.gif';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+
+    document.getElementById('gifTitle').textContent = 'GIF ready!';
+    document.getElementById('gifStatus').textContent = formatBytes(blob.size) + ' \u2014 downloading now';
+    document.getElementById('gifProgressFill').style.width = '100%';
+    document.getElementById('gifCancelBtn').textContent = 'Done';
+
+    restoreAfterExport(savedSpread, savedMobile, wasEdit);
+  });
+
+  gif.render();
+}
+
+function cancelGifExport() {
+  if (document.getElementById('gifCancelBtn').textContent === 'Done') {
+    document.getElementById('gifOverlay').classList.remove('show');
+    return;
+  }
+  gifCancelled = true;
+  document.getElementById('gifOverlay').classList.remove('show');
+}
+
+function restoreAfterExport(savedSpread, savedMobile, wasEdit) {
+  if (mobileMode) currentMobilePage = savedMobile;
+  else currentSpread = savedSpread;
+  if (wasEdit) isEditMode = true;
+  render();
+}
+
+// ================================================================
+//  VIDEO EXPORT (full quality MP4/WebM — two-page spreads)
+// ================================================================
+async function startVideoExport() {
+  gifCancelled = false;
+  document.getElementById('gifOverlay').classList.add('show');
+  document.getElementById('gifProgressFill').style.width = '0%';
+  document.getElementById('gifStatus').textContent = 'Loading images\u2026';
+  document.getElementById('gifTitle').textContent = 'Creating your video\u2026';
+  document.getElementById('gifCancelBtn').textContent = 'Cancel';
+
+  if (slideshowTimer) stopSlideshow();
+
+  const savedSpread = currentSpread;
+  const savedMobile = currentMobilePage;
+  const wasEdit = isEditMode;
+  if (wasEdit) { isEditMode = false; render(); }
+
+  const originals = await preloadAllImages((done, tot) => {
+    document.getElementById('gifProgressFill').style.width = Math.round((done / tot) * 15) + '%';
+    document.getElementById('gifStatus').textContent = 'Loading image ' + done + ' of ' + tot + '\u2026';
+  });
+
+  if (gifCancelled) { restoreImageUrls(originals); restoreAfterExport(savedSpread, savedMobile, wasEdit); return; }
+
+  const captureStyle = document.createElement('style');
+  captureStyle.id = 'vid-capture-override';
+  captureStyle.textContent = [
+    '.page-left > *, .page-right > * { animation: none !important; opacity: 1 !important; transform: none !important; }',
+    '.cover-left, .cover-right, .photo-page, .end-left, .end-right, .blank-page,',
+    '.text-page-body, .photo-grid, .photo-cell, .photo-cell img, .photo-meta,',
+    '.photo-caption, .cover-left-name, .cover-left-label, .cover-left-date,',
+    '.cover-left-hint, .cover-right-quote, .cover-right-attr, .end-title, .end-sub {',
+    '  animation: none !important; opacity: 1 !important; transform: none !important; visibility: visible !important; }',
+    '.photo-cell img { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block !important; opacity: 1 !important; }'
+  ].join('\n');
+  document.head.appendChild(captureStyle);
+
+  // Capture two-page spreads at native resolution (no downscaling)
+  const vidSpreads = buildSpreads();
+  const totalPages = vidSpreads.length;
+  const frames = [];
+  let pageIndex = 0;
+
+  function captureNext() {
+    if (gifCancelled) { captureStyle.remove(); restoreImageUrls(originals); restoreAfterExport(savedSpread, savedMobile, wasEdit); return; }
+    if (pageIndex >= totalPages) { captureStyle.remove(); restoreImageUrls(originals); recordVideo(frames, savedSpread, savedMobile, wasEdit); return; }
+
+    currentSpread = pageIndex;
+    renderDesktop();
+
+    const pct = 15 + Math.round(((pageIndex + 1) / totalPages) * 25);
+    document.getElementById('gifProgressFill').style.width = pct + '%';
+    document.getElementById('gifStatus').textContent = 'Capturing spread ' + (pageIndex + 1) + ' of ' + totalPages + '\u2026';
+
+    setTimeout(() => {
+      const bookEl = document.getElementById('book');
+      html2canvas(bookEl, {
+        backgroundColor: '#FDFAF7', scale: 1, useCORS: false, allowTaint: false, logging: false,
+        width: bookEl.offsetWidth, height: bookEl.offsetHeight
+      }).then(canvas => {
+        frames.push(canvas);
+        pageIndex++;
+        captureNext();
+      }).catch(() => {
+        const c = document.createElement('canvas');
+        c.width = 1052; c.height = 680;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#FDFAF7';
+        ctx.fillRect(0, 0, 1052, 680);
+        frames.push(c);
+        pageIndex++;
+        captureNext();
+      });
+    }, 600);
+  }
+
+  captureNext();
+}
+
+function recordVideo(frames, savedSpread, savedMobile, wasEdit) {
+  if (frames.length === 0 || gifCancelled) { restoreAfterExport(savedSpread, savedMobile, wasEdit); return; }
+
+  document.getElementById('gifStatus').textContent = 'Recording video\u2026';
+  document.getElementById('gifProgressFill').style.width = '45%';
+
+  const w = frames[0].width;
+  const h = frames[0].height;
+
+  // Convert to ImageData upfront
+  const schedule = frames.map((canvas, i) => ({
+    imageData: canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height),
+    delay: (i === frames.length - 1) ? 5000 : 3000
+  }));
+
+  const recCanvas = document.createElement('canvas');
+  recCanvas.width = w; recCanvas.height = h;
+  const ctx = recCanvas.getContext('2d');
+
+  const stream = recCanvas.captureStream(0);
+  const track = stream.getVideoTracks()[0];
+
+  let mimeType = 'video/webm;codecs=vp9';
+  let ext = 'webm';
+  if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) { mimeType = 'video/mp4;codecs=avc1'; ext = 'mp4'; }
+  else if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm'; }
+
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+    if (gifCancelled) { restoreAfterExport(savedSpread, savedMobile, wasEdit); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (CONFIG.name.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'photobook') + '-slideshow.' + ext;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    document.getElementById('gifTitle').textContent = 'Video ready!';
+    document.getElementById('gifStatus').textContent = formatBytes(blob.size) + ' \u2014 downloading (' + ext.toUpperCase() + ')';
+    document.getElementById('gifProgressFill').style.width = '100%';
+    document.getElementById('gifCancelBtn').textContent = 'Done';
+    restoreAfterExport(savedSpread, savedMobile, wasEdit);
+  };
+
+  recorder.start();
+
+  // Draw first frame
+  ctx.putImageData(schedule[0].imageData, 0, 0);
+  if (track.requestFrame) track.requestFrame();
+
+  let frameIdx = 0;
+
+  // Variable-delay playback using recursive setTimeout
+  function drawNextVideoFrame() {
+    if (gifCancelled) { recorder.stop(); return; }
+    const currentDelay = schedule[frameIdx].delay;
+    frameIdx++;
+
+    if (frameIdx >= schedule.length) {
+      setTimeout(() => recorder.stop(), 2000);
+      return;
+    }
+
+    const pct = 45 + Math.round((frameIdx / schedule.length) * 55);
+    document.getElementById('gifProgressFill').style.width = pct + '%';
+
+    ctx.putImageData(schedule[frameIdx].imageData, 0, 0);
+    if (track.requestFrame) track.requestFrame();
+    setTimeout(drawNextVideoFrame, currentDelay);
+  }
+
+  setTimeout(drawNextVideoFrame, schedule[0].delay);
 }
 
 // ================================================================
